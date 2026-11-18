@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Antrian Pangkas Rambut Realtime</title>
+  <style>
+    * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+    body { background: #121212; color: #f5f5f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+    .container { width: 100%; max-width: 420px; background: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    h1 { text-align: center; font-size: 1.4rem; color: #f59e0b; margin-bottom: 5px; }
+    p.sub { text-align: center; font-size: 0.85rem; color: #aaa; margin-top: 0; }
+    .box-aktif { background: #27272a; border: 2px solid #f59e0b; border-radius: 10px; padding: 15px; text-align: center; margin: 15px 0; }
+    .nomor-besar { font-size: 3.5rem; font-weight: bold; color: #f59e0b; margin: 5px 0; }
+    .nama-aktif { font-size: 1.1rem; color: #fff; }
+    input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #2a2a2a; color: #fff; margin-bottom: 10px; font-size: 1rem; }
+    button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-bottom: 10px; }
+    .btn-ambil { background: #f59e0b; color: #000; }
+    .btn-next { background: #10b981; color: #fff; }
+    .btn-reset { background: #ef4444; color: #fff; font-size: 0.85rem; padding: 8px; }
+    .list-antrian { margin-top: 20px; border-top: 1px solid #333; padding-top: 15px; }
+    .item { display: flex; justify-content: space-between; background: #2a2a2a; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; }
+    .admin-panel { margin-top: 25px; padding-top: 15px; border-top: 1px dashed #555; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>✂️ BARBERSHOP ANTRIAN</h1>
+  <p class="sub">Pantau & ambil giliran cukur secara realtime</p>
+
+  <!-- Tampilan Nomor Sedang Dicukur -->
+  <div class="box-aktif">
+    <div>SEDANG DILAYANI</div>
+    <div class="nomor-besar" id="nomorAktif">-</div>
+    <div class="nama-aktif" id="namaAktif">Belum ada antrian</div>
+  </div>
+
+  <!-- Form Pelanggan Ambil Antrian -->
+  <input type="text" id="inputNama" placeholder="Masukkan nama Anda..." autocomplete="off">
+  <button class="btn-ambil" onclick="ambilAntrian()">Ambil Nomor Antrian</button>
+
+  <!-- Daftar Menunggu -->
+  <div class="list-antrian">
+    <strong>Daftar Menunggu (<span id="jumlahMenunggu">0</span>):</strong>
+    <div id="daftarAntrian" style="margin-top: 10px;"></div>
+  </div>
+
+  <!-- Panel Khusus Kasir / Kapster -->
+  <div class="admin-panel">
+    <p style="font-size: 0.8rem; color: #aaa; margin-bottom: 8px;">Panel Kasir / Kapster:</p>
+    <button class="btn-next" onclick="panggilBerikutnya()">Panggil Giliran Berikutnya ➔</button>
+    <button class="btn-reset" onclick="resetAntrian()">Reset Semua Antrian (Hari Baru)</button>
+  </div>
+</div>
+
+<!-- SDK Firebase Realtime Database -->
+<script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, push, onValue, remove, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+  // GANTI BAGIAN INI DENGAN CONFIG FIREBASE ANDA
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDNkrUtETfPhw1T1653yJuF8RfxEIHYaVw",
+  authDomain: "pangkas-station.firebaseapp.com",
+  databaseURL: "https://pangkas-station-default-rtdb.firebaseio.com",
+  projectId: "pangkas-station",
+  storageBucket: "pangkas-station.firebasestorage.app",
+  messagingSenderId: "311845326404",
+  appId: "1:311845326404:web:8d057d5ca18f1d3bfd3611"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+
+  const db = getDatabase(app);
+  const antrianRef = ref(db, 'antrian_barber');
+  const aktifRef = ref(db, 'sedang_dilayani');
+  const counterRef = ref(db, 'nomor_terakhir');
+
+  let nomorTerakhir = 0;
+  let daftarSaatIni = [];
+
+  // Pantau perubahan nomor terakhir
+  onValue(counterRef, (snapshot) => {
+    nomorTerakhir = snapshot.val() || 0;
+  });
+
+  // Pantau pelanggan yang sedang dilayani secara realtime
+  onValue(aktifRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data) {
+      document.getElementById('nomorAktif').innerText = "A-" + data.nomor;
+      document.getElementById('namaAktif').innerText = data.nama;
+    } else {
+      document.getElementById('nomorAktif').innerText = "-";
+      document.getElementById('namaAktif').innerText = "Kursi Kosong";
+    }
+  });
+
+  // Pantau daftar antrian menunggu secara realtime
+  onValue(antrianRef, (snapshot) => {
+    const container = document.getElementById('daftarAntrian');
+    container.innerHTML = "";
+    daftarSaatIni = [];
+
+    snapshot.forEach((child) => {
+      const val = child.val();
+      daftarSaatIni.push({ key: child.key, ...val });
+      container.innerHTML += `
+        <div class="item">
+          <span><strong>A-${val.nomor}</strong> - ${val.nama}</span>
+          <span style="color:#f59e0b; font-size:0.85rem;">Menunggu</span>
+        </div>
+      `;
+    });
+    document.getElementById('jumlahMenunggu').innerText = daftarSaatIni.length;
+  });
+
+  // Fungsi pelanggan ambil nomor
+  window.ambilAntrian = function() {
+    const nama = document.getElementById('inputNama').value.trim();
+    if (!nama) return alert("Silakan isi nama Anda terlebih dahulu!");
+
+    const nomorBaru = nomorTerakhir + 1;
+    set(counterRef, nomorBaru);
+    push(antrianRef, { nomor: nomorBaru, nama: nama });
+    document.getElementById('inputNama').value = "";
+    alert("Berhasil! Nomor antrian Anda adalah A-" + nomorBaru);
+  };
+
+const PIN_ADMIN = "bayar dulu";
+
+  // Fungsi kasir memanggil antrian berikutnya
+  
+  window.panggilBerikutnya = function() {
+    const inputPin = prompt("Masukkan PIN Kasir:");
+if (inputPin !== PIN_ADMIN) return alert("PIN salah! Akses ditolak.");
+
+    if (daftarSaatIni.length === 0) {
+      set(aktifRef, null);
+      return alert("Tidak ada antrian yang menunggu.");
+    }
+    const berikutnya = daftarSaatIni[0];
+    set(aktifRef, { nomor: berikutnya.nomor, nama: berikutnya.nama });
+    remove(ref(db, 'antrian_barber/' + berikutnya.key));
+  };
+
+  // Fungsi reset antrian
+  window.resetAntrian = function() {
+    const inputPin = prompt("Masukkan PIN Kasir:");
+if (inputPin !== PIN_ADMIN) return alert("PIN salah! Akses ditolak.");
+
+    if (confirm("Yakin ingin menghapus semua antrian hari ini?")) {
+      remove(antrianRef);
+      set(aktifRef, null);
+      set(counterRef, 0);
+    }
+  };
+</script>
+
+</body>
+</html>
